@@ -152,10 +152,6 @@ class VersionMatcher:
     @classmethod
     def _split_constraints(cls, c_str: str) -> List[str]:
         """Split combined constraints (e.g. '>=1.19 <1.20' or '>=1.19, <1.20')."""
-        # If it's a single maven range like [1.0, 2.0), do NOT split by comma!
-        if cls.is_maven_range(c_str):
-            return [c_str]
-
         # Replace commas with spaces if not inside brackets
         tokens = c_str.replace(",", " ").split()
         return [t.strip() for t in tokens if t.strip()]
@@ -247,25 +243,20 @@ class VersionMatcher:
                 target = ComparableVersion(target_str)
                 if op == ">=":
                     return ver >= target
-                if op == "<=":
+                elif op == "<=":
                     return ver <= target
-                if op == ">":
+                elif op == ">":
                     return ver > target
-                if op == "<":
+                elif op == "<":
                     return ver < target
-                if op == "!=":
+                elif op == "!=":
                     return ver != target
-                if op == "=":
+                else:  # op == "="
                     return ver == target
 
         # Soft requirement or plain version match:
-        # In Fabric: "1.20.1" usually means exact or compatible.
-        # If strict equality matches or starts with prefix (e.g. "1.20.1" matches "1.20.1-fabric"):
         if v_str == c:
             return True
 
         # Try version equality
-        try:
-            return ComparableVersion(v_str) == ComparableVersion(c)
-        except Exception:
-            return v_str == c
+        return ComparableVersion(v_str) == ComparableVersion(c)

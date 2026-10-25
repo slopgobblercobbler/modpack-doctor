@@ -29,9 +29,9 @@ def test_graph_construction_and_provides():
 
 
 def test_detect_cycles():
-    # Mod A -> Mod B -> Mod A
+    # Mod A -> Mod B, and Mod B has TWO edges back to Mod A to trigger line 80->66
     mod_a = make_mod("mod_a", deps=[Dependency(mod_id="mod_b")])
-    mod_b = make_mod("mod_b", deps=[Dependency(mod_id="mod_a")])
+    mod_b = make_mod("mod_b", deps=[Dependency(mod_id="mod_a"), Dependency(mod_id="mod_a")])
 
     graph = ModDependencyGraph.from_mods([mod_a, mod_b])
     cycles = graph.detect_cycles()
@@ -64,13 +64,29 @@ def test_to_ascii_tree():
     assert "mod_a@1.0.0" in tree_single
 
 
+def test_detect_cycles_diamond_and_missing():
+    # Mod A -> Mod B, Mod A -> Mod C, Mod B -> Mod D, Mod C -> Mod D (Diamond, no cycle)
+    # Also Mod D -> Mod Missing (missing node)
+    mod_a = make_mod("mod_a", deps=[Dependency(mod_id="mod_b"), Dependency(mod_id="mod_c")])
+    mod_b = make_mod("mod_b", deps=[Dependency(mod_id="mod_d")])
+    mod_c = make_mod("mod_c", deps=[Dependency(mod_id="mod_d")])
+    mod_d = make_mod("mod_d", deps=[Dependency(mod_id="missing_dep")])
+
+    graph = ModDependencyGraph.from_mods([mod_a, mod_b, mod_c, mod_d])
+    cycles = graph.detect_cycles()
+    assert len(cycles) == 0
+
+
 def test_to_ascii_tree_circular_and_depth_limit():
     mod_a = make_mod("mod_a", deps=[Dependency(mod_id="mod_b")])
     mod_b = make_mod("mod_b", deps=[Dependency(mod_id="mod_a")])
 
     graph = ModDependencyGraph.from_mods([mod_a, mod_b])
-    tree = graph.to_ascii_tree(root_id="mod_a", max_depth=2)
-    assert "[circular reference]" in tree or "..." in tree
+    tree_circ = graph.to_ascii_tree(root_id="mod_a", max_depth=10)
+    assert "[circular reference]" in tree_circ
+
+    tree_depth = graph.to_ascii_tree(root_id="mod_a", max_depth=1)
+    assert "... (depth limit reached)" in tree_depth
 
 
 def test_to_mermaid_and_dot():

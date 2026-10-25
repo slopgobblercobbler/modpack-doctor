@@ -56,11 +56,58 @@ def test_incompatible_version():
 
 
 def test_conflict_breaks():
-    mod_a = make_mod("mod_a", deps=[Dependency(mod_id="mod_b", version_range="*", dep_type=DepType.BREAKS)])
+    mod_a = make_mod("mod_a", deps=[
+        Dependency(mod_id="mod_b", version_range="", dep_type=DepType.BREAKS),
+        Dependency(mod_id="mod_b2", version_range=">=1.0.0", dep_type=DepType.BREAKS),
+        Dependency(mod_id="mod_c", version_range=">=2.0.0", dep_type=DepType.CONFLICT),
+        Dependency(mod_id="not_installed", version_range="*", dep_type=DepType.CONFLICT),
+    ])
     mod_b = make_mod("mod_b", version="1.0.0")
+    mod_b2 = make_mod("mod_b2", version="1.0.0")
+    mod_c = make_mod("mod_c", version="1.0.0")
     engine = DiagnosticEngine()
-    issues = engine.diagnose_mods([mod_a, mod_b])
+    issues = engine.diagnose_mods([mod_a, mod_b, mod_b2, mod_c])
     assert any(i.code == IssueCode.CONFLICT_DETECTED and i.related_mod_id == "mod_b" for i in issues)
+    assert any(i.code == IssueCode.CONFLICT_DETECTED and i.related_mod_id == "mod_b2" for i in issues)
+    assert not any(i.related_mod_id == "mod_c" for i in issues)
+    assert not any(i.related_mod_id == "not_installed" for i in issues)
+
+
+def test_compatible_required_and_recommended_present():
+    mod_a = make_mod(
+        "mod_a",
+        deps=[
+            Dependency(mod_id="mod_b", version_range=">=1.0.0", dep_type=DepType.REQUIRED),
+            Dependency(mod_id="mod_c", version_range="*", dep_type=DepType.RECOMMENDED),
+        ],
+    )
+    mod_b = make_mod("mod_b", version="1.0.0")
+    mod_c = make_mod("mod_c", version="1.0.0")
+    engine = DiagnosticEngine()
+    issues = engine.diagnose_mods([mod_a, mod_b, mod_c])
+    assert len(issues) == 0
+
+
+def test_mixed_entrypoints_on_server():
+    mod_mixed = make_mod(
+        "mod_mixed",
+        env=Environment.UNIVERSAL,
+        entrypoints={"client": ["com.example.Client"], "main": ["com.example.Main"]},
+    )
+    engine_server = DiagnosticEngine(target_env="server")
+    issues = engine_server.diagnose_mods([mod_mixed])
+    assert not any(i.code == IssueCode.CLIENT_MOD_ON_SERVER for i in issues)
+
+
+def test_universal_mod_on_client():
+    mod_univ = make_mod("mod_univ", env=Environment.UNIVERSAL)
+    engine_client = DiagnosticEngine(target_env="client")
+    issues_client = engine_client.diagnose_mods([mod_univ])
+    assert not any(i.code == IssueCode.SERVER_MOD_ON_CLIENT for i in issues_client)
+
+    engine_other = DiagnosticEngine(target_env="agnostic")
+    issues_other = engine_other.diagnose_mods([mod_univ])
+    assert issues_other == []
 
 
 def test_recommended_optional_info():
@@ -72,12 +119,10 @@ def test_recommended_optional_info():
 
 def test_virtual_minecraft_dep():
     mod_a = make_mod("mod_a", deps=[Dependency(mod_id="minecraft", version_range=">=1.20.0")])
-    # Case 1: matching MC version
     engine_ok = DiagnosticEngine(minecraft_version="1.20.1")
     issues_ok = engine_ok.diagnose_mods([mod_a])
     assert not any(i.related_mod_id == "minecraft" for i in issues_ok)
 
-    # Case 2: incompatible MC version
     engine_bad = DiagnosticEngine(minecraft_version="1.19.4")
     issues_bad = engine_bad.diagnose_mods([mod_a])
     assert any(i.code == IssueCode.INCOMPATIBLE_VERSION and i.related_mod_id == "minecraft" for i in issues_bad)
@@ -89,14 +134,18 @@ def test_virtual_java_and_loader_dep():
         deps=[
             Dependency(mod_id="java", version_range=">=17"),
             Dependency(mod_id="fabricloader", version_range=">=0.15.0"),
+            Dependency(mod_id="some_optional", dep_type=DepType.OPTIONAL),
+            Dependency(mod_id="some_discouraged", dep_type=DepType.DISCOURAGED),
         ],
     )
-    # Test java mismatch
+    engine_ok = DiagnosticEngine(java_version="17", loader_version="0.15.0")
+    issues_ok = engine_ok.diagnose_mods([mod_a])
+    assert not any(i.related_mod_id in ("java", "fabricloader") for i in issues_ok)
+
     engine_java = DiagnosticEngine(java_version="16")
     issues_java = engine_java.diagnose_mods([mod_a])
     assert any(i.related_mod_id == "java" for i in issues_java)
 
-    # Test loader mismatch
     engine_loader = DiagnosticEngine(loader_version="0.14.20")
     issues_loader = engine_loader.diagnose_mods([mod_a])
     assert any(i.related_mod_id == "fabricloader" for i in issues_loader)
@@ -109,7 +158,6 @@ def test_duplicate_mods():
     issues = engine.diagnose_mods([mod1, mod2])
     assert any(i.code == IssueCode.DUPLICATE_MOD and i.severity == IssueSeverity.CRITICAL for i in issues)
 
-    # Same version
     mod3 = make_mod("dup_mod2", version="1.0.0", file_name="dup1.jar")
     mod4 = make_mod("dup_mod2", version="1.0.0", file_name="dup2.jar")
     issues_same = engine.diagnose_mods([mod3, mod4])
@@ -117,18 +165,15 @@ def test_duplicate_mods():
 
 
 def test_environment_mismatches():
-    # Client-only mod on server
     mod_client = make_mod("client_hud", env=Environment.CLIENT)
     engine_server = DiagnosticEngine(target_env="server")
     issues_server = engine_server.diagnose_mods([mod_client])
     assert any(i.code == IssueCode.CLIENT_MOD_ON_SERVER for i in issues_server)
 
-    # Client-only entrypoints on server
     mod_ep = make_mod("client_ep", env=Environment.UNIVERSAL, entrypoints={"client": ["com.example.Client"]})
     issues_ep = engine_server.diagnose_mods([mod_ep])
     assert any(i.code == IssueCode.CLIENT_MOD_ON_SERVER for i in issues_ep)
 
-    # Server-only mod on client
     mod_server = make_mod("server_tool", env=Environment.SERVER)
     engine_client = DiagnosticEngine(target_env="client")
     issues_client = engine_client.diagnose_mods([mod_server])
@@ -136,14 +181,11 @@ def test_environment_mismatches():
 
 
 def test_skip_side_dependencies():
-    # Mod A requires Client Dep only on client side.
-    # When target is server, missing client-side dependency should be skipped.
     mod_a = make_mod("mod_a", deps=[Dependency(mod_id="client_dep", side=Environment.CLIENT)])
     engine_server = DiagnosticEngine(target_env="server")
     issues = engine_server.diagnose_mods([mod_a])
     assert not any(i.related_mod_id == "client_dep" for i in issues)
 
-    # When target is client, server-side dependency is skipped
     mod_b = make_mod("mod_b", deps=[Dependency(mod_id="server_dep", side=Environment.SERVER)])
     engine_client = DiagnosticEngine(target_env="client")
     issues_c = engine_client.diagnose_mods([mod_b])

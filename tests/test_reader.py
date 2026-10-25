@@ -41,7 +41,25 @@ def test_read_fabric_jar(tmp_path: Path):
     assert mod.mixin_configs[0].mixins == ["TestMixin"]
 
 
-def test_read_forge_jar(tmp_path: Path):
+def test_read_forge_duplicate_mixin_and_case_insensitive(tmp_path: Path):
+    # Manifest has dup.mixins.json twice to hit duplicate check, and UPPER.mixins.json matching upper case
+    jar_bytes = make_forge_jar_bytes(
+        mod_id="test_forge_dup",
+        mixin_configs=["dup.mixins.json", "dup.mixins.json", "LOWER.mixins.json"],
+        mixin_files={
+            "lower.mixins.json": {
+                "package": "com.test.mixin",
+                "mixins": ["CaseMixin"],
+            }
+        },
+    )
+    jar_file = tmp_path / "case_test.jar"
+    jar_file.write_bytes(jar_bytes)
+
+    mods, issues = JarReader.read_jar_file(jar_file)
+    assert len(mods) == 1
+    assert any(m.config_file == "LOWER.mixins.json" for m in mods[0].mixin_configs)
+
     jar_bytes = make_forge_jar_bytes(
         mod_id="test_forge",
         version="2.0.0",
@@ -177,3 +195,63 @@ def test_scanner_directory(tmp_path: Path):
     mods_err, issues_err = ModpackScanner.scan_directory(tmp_path / "nonexistent")
     assert len(mods_err) == 0
     assert len(issues_err) == 1
+
+
+def test_reader_stat_and_open_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    jar_file = tmp_path / "mod_test.jar"
+    jar_file.write_bytes(make_fabric_jar_bytes("mod_test"))
+
+    # Test stat raising OSError
+    orig_stat = Path.stat
+    calls = 0
+
+    def mock_stat(self):
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            raise OSError("Permission denied")
+        return orig_stat(self)
+
+    monkeypatch.setattr(Path, "stat", mock_stat)
+    mods, issues = JarReader.read_jar_file(jar_file)
+    assert len(mods) == 1
+    assert mods[0].file_size == 0
+
+    # Test open raising OSError
+    monkeypatch.undo()
+    monkeypatch.setattr("builtins.open", lambda *a, **kw: (_ for _ in ()).throw(PermissionError("Locked file")))
+    mods2, issues2 = JarReader.read_jar_file(jar_file)
+    assert len(mods2) == 0
+    assert len(issues2) == 1
+    assert issues2[0].code == IssueCode.CORRUPT_JAR
+
+
+def test_reader_nested_missing_and_corrupt(tmp_path: Path):
+    # Nested jar declared in manifest, but file missing from zip
+    parent_bytes = make_fabric_jar_bytes(
+        mod_id="parent_mod",
+        jars=[{"file": "META-INF/jars/missing_nested.jar"}],
+    )
+    jar_file = tmp_path / "missing_nested.jar"
+    jar_file.write_bytes(parent_bytes)
+
+    mods, issues = JarReader.read_jar_file(jar_file)
+    assert len(mods) == 1
+    assert mods[0].id == "parent_mod"
+
+
+def test_reader_mixin_unreadable_file(tmp_path: Path):
+    # Mod declares mixin file, but zip cannot read it or corrupted content
+    jar_bytes = make_fabric_jar_bytes(
+        mod_id="test_mod",
+        mixins=["broken.mixins.json"],
+    )
+    # The file "broken.mixins.json" is not written into zip, so target_key is not in namelist
+    jar_file = tmp_path / "mixin_broken.jar"
+    jar_file.write_bytes(jar_bytes)
+
+    mods, _ = JarReader.read_jar_file(jar_file)
+    assert len(mods) == 1
+    assert len(mods[0].mixin_configs) == 1
+    assert mods[0].mixin_configs[0].config_file == "broken.mixins.json"
+

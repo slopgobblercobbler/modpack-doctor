@@ -75,16 +75,47 @@ def test_cli_scan_plain_and_markdown(tmp_path: Path):
     assert "# 🩺 Modpack Doctor Diagnostic Report" in res_md.output
 
 
-def test_cli_inspect_valid_and_json(tmp_path: Path):
+def test_cli_scan_no_fail_on_error(tmp_path: Path):
     jar1 = tmp_path / "mod1.jar"
-    jar1.write_bytes(make_fabric_jar_bytes("mod1", version="1.2.3", description="Inspect test", provides=["alias1"]))
+    jar1.write_bytes(make_fabric_jar_bytes("mod1", depends={"missing_mod": ">=1.0.0"}))
 
     runner = CliRunner()
-    # Plain inspect
+    result = runner.invoke(main, ["scan", str(tmp_path), "--no-fail-on-error"])
+    assert result.exit_code == 0
+
+
+def test_cli_inspect_valid_and_json(tmp_path: Path):
+    # Mod with dependencies, mixins, nested jars, provides
+    jar1 = tmp_path / "mod1.jar"
+    jar1.write_bytes(
+        make_fabric_jar_bytes(
+            "mod1",
+            version="1.2.3",
+            description="Inspect test",
+            provides=["alias1"],
+            depends={"dep1": ">=1.0"},
+            mixins=["mod1.mixins.json"],
+            jars=[{"file": "META-INF/jars/sub.jar"}],
+        )
+    )
+
+    runner = CliRunner()
+    # Plain inspect with all metadata present
     res_plain = runner.invoke(main, ["inspect", str(jar1)])
     assert res_plain.exit_code == 0
     assert "MOD JAR INSPECTION" in res_plain.output
     assert "Mod ID:       mod1" in res_plain.output
+    assert "Provides:     alias1" in res_plain.output
+    assert "[REQUIRED] dep1" in res_plain.output
+    assert "mod1.mixins.json" in res_plain.output
+    assert "META-INF/jars/sub.jar" in res_plain.output
+
+    # Inspect mod with no dependencies/mixins/nested jars
+    jar_empty = tmp_path / "empty.jar"
+    jar_empty.write_bytes(make_fabric_jar_bytes("empty_mod"))
+    res_empty = runner.invoke(main, ["inspect", str(jar_empty)])
+    assert res_empty.exit_code == 0
+    assert "(None)" in res_empty.output
 
     # JSON inspect
     res_json = runner.invoke(main, ["inspect", str(jar1), "-f", "json"])
@@ -115,6 +146,11 @@ def test_cli_graph(tmp_path: Path):
     res_tree = runner.invoke(main, ["graph", str(tmp_path), "-f", "tree"])
     assert res_tree.exit_code == 0
     assert "mod1" in res_tree.output
+
+    # Tree with root
+    res_tree_root = runner.invoke(main, ["graph", str(tmp_path), "-f", "tree", "-r", "mod1"])
+    assert res_tree_root.exit_code == 0
+    assert "mod1" in res_tree_root.output
 
     # Mermaid
     res_mermaid = runner.invoke(main, ["graph", str(tmp_path), "-f", "mermaid"])

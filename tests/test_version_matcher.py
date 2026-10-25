@@ -7,8 +7,10 @@ from modpack_doctor.version_matcher import ComparableVersion, VersionMatcher
 def test_comparable_version_basic():
     v1 = ComparableVersion("1.2.3")
     v2 = ComparableVersion("v1.2.3")
+    v2_cap = ComparableVersion("V1.2.3")
     v3 = ComparableVersion("1.2.4")
     assert v1 == v2
+    assert v1 == v2_cap
     assert v1 < v3
     assert v1 <= v3
     assert v3 > v1
@@ -17,21 +19,40 @@ def test_comparable_version_basic():
 
 
 def test_comparable_version_fallback():
+    # Consecutive dots / delimiters to hit empty part
+    v_dots = ComparableVersion("1..0")
+    assert v_dots == "1..0"
+
     # Minecraft snapshots
     v1 = ComparableVersion("24w10a")
-    v2 = ComparableVersion("24w11a")
+    v2 = ComparableVersion("24w10b")
     assert v1 < v2
+    assert v2 > v1
+    assert v1 <= v2
+    assert v2 >= v1
     assert v1 != v2
 
     v3 = ComparableVersion("24w10a")
     assert v1 == v3
 
+    # Fallback tuple comparison length differences
+    v_short = ComparableVersion("24w10")
+    assert v_short < v1
+    assert v1 > v_short
+
     # Mixed standard vs fallback
     v_std = ComparableVersion("1.20.1")
     v_snap = ComparableVersion("24w10a")
     assert v_std != v_snap
-    # Check comparison doesn't raise error
+    # Check comparison both ways (std < fallback and fallback < std)
     assert (v_std < v_snap) or (v_std > v_snap)
+    assert (v_snap < v_std) or (v_snap > v_std)
+
+    # String comparison in fallback tuple
+    v_alpha = ComparableVersion("1.0.0-alpha")
+    v_beta = ComparableVersion("1.0.0-beta")
+    assert v_alpha < v_beta
+    assert v_beta > v_alpha
 
 
 def test_comparable_version_object_compare():
@@ -39,6 +60,24 @@ def test_comparable_version_object_compare():
     assert v1 == "1.0.0"
     assert v1 != "2.0.0"
     assert (v1 == object()) is False
+    assert v1 < "2.0.0"
+
+    class BadStr:
+        def __str__(self):
+            raise ValueError("boom")
+
+    assert (v1 == BadStr()) is False
+
+
+def test_version_matcher_caret_tilde_fallbacks():
+    # Caret with non-digit parts
+    assert VersionMatcher.matches("alpha.2", "^alpha.1") in (True, False)
+    # Tilde with single part or non-digit
+    assert VersionMatcher.matches("1", "~1") in (True, False)
+    assert VersionMatcher.matches("alpha", "~alpha") in (True, False)
+
+    # Malformed multi-comma maven range
+    assert VersionMatcher.matches("1.5.0", "[1.0, 2.0, 3.0]") is True
 
 
 def test_version_matcher_wildcards():

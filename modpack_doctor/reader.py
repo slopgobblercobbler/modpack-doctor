@@ -84,11 +84,8 @@ class JarReader:
                 manifest_mf = ""
                 for mf_candidate in ("meta-inf/manifest.mf", "meta-inf/manifest.mf/"):
                     if mf_candidate in normalized_names:
-                        try:
-                            manifest_mf = zf.read(normalized_names[mf_candidate]).decode("utf-8", errors="replace")
-                            break
-                        except Exception:
-                            pass
+                        manifest_mf = zf.read(normalized_names[mf_candidate]).decode("utf-8", errors="replace")
+                        break
 
                 # Search manifests in priority order
                 # 1. fabric.mod.json
@@ -149,18 +146,15 @@ class JarReader:
                         for nested_path in mod.nested_jars:
                             nested_key = nested_path.replace("\\", "/")
                             if nested_key in namelist:
-                                try:
-                                    nested_bytes = zf.read(nested_key)
-                                    nested_mods, nested_issues = cls.read_jar_bytes(
-                                        nested_bytes,
-                                        file_name=Path(nested_path).name,
-                                        file_path=f"{file_path}!/{nested_path}",
-                                        file_size=len(nested_bytes),
-                                    )
-                                    mods.extend(nested_mods)
-                                    issues.extend(nested_issues)
-                                except Exception:
-                                    pass
+                                nested_bytes = zf.read(nested_key)
+                                nested_mods, nested_issues = cls.read_jar_bytes(
+                                    nested_bytes,
+                                    file_name=Path(nested_path).name,
+                                    file_path=f"{file_path}!/{nested_path}",
+                                    file_size=len(nested_bytes),
+                                )
+                                mods.extend(nested_mods)
+                                issues.extend(nested_issues)
 
                 mods.extend(parsed_mods)
                 return mods, issues
@@ -214,12 +208,9 @@ class JarReader:
                     target_key = normalized_names[cfg_name.lower()]
 
                 if target_key:
-                    try:
-                        content = zf.read(target_key).decode("utf-8", errors="replace")
-                        parsed = MixinAnalyzer.parse_mixin_json(content, cfg_name)
-                        detailed_mixins.append(parsed)
-                    except Exception:
-                        detailed_mixins.append(mixin_entry)
+                    content = zf.read(target_key).decode("utf-8", errors="replace")
+                    parsed = MixinAnalyzer.parse_mixin_json(content, cfg_name)
+                    detailed_mixins.append(parsed)
                 else:
                     detailed_mixins.append(mixin_entry)
 

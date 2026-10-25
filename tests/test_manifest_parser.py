@@ -276,6 +276,163 @@ versionRange="*"
     assert types["other_neo"] == DepType.REQUIRED
 
 
+def test_fabric_corner_cases():
+    content = """{
+        "id": "corner_mod",
+        "depends": {"int_dep": 123},
+        "recommends": null,
+        "entrypoints": {
+            "main": "com.example.DirectString",
+            "ignored": 123
+        },
+        "mixins": [{"not_config": "foo"}, 42],
+        "jars": [{"no_file": "bar"}, "string_jar"],
+        "authors": [{"no_name": "baz"}, 123]
+    }"""
+    mod = ManifestParser.parse_fabric(content)
+    assert mod.id == "corner_mod"
+    assert mod.entrypoints["main"] == ["com.example.DirectString"]
+    assert "ignored" not in mod.entrypoints
+    assert mod.dependencies[0].mod_id == "int_dep"
+    assert mod.dependencies[0].version_range == "*"
+    assert len(mod.mixin_configs) == 0
+    assert len(mod.nested_jars) == 0
+    assert len(mod.authors) == 0
+
+
+def test_quilt_corner_cases():
+    content = """{
+        "quilt_loader": {
+            "id": "quilt_corner",
+            "depends": [42, {"id": "str_ver_dep", "versions": ">=1.0"}],
+            "breaks": [99],
+            "mixin": [123]
+        }
+    }"""
+    mod = ManifestParser.parse_quilt(content)
+    assert mod.id == "quilt_corner"
+    assert len(mod.dependencies) == 1
+    assert mod.dependencies[0].mod_id == "str_ver_dep"
+    assert mod.dependencies[0].version_range == ">=1.0"
+    assert len(mod.mixin_configs) == 0
+
+
+def test_forge_corner_cases():
+    toml_str = """
+modLoader="javafml"
+
+[[mods]]
+# Missing modId -> skipped
+
+[[mods]]
+modId="valid_mod"
+# Missing version -> resolved to default
+
+[dependencies]
+# dependencies is not list
+valid_mod = "not_a_list"
+"""
+    mods = ManifestParser.parse_forge_toml(toml_str)
+    assert len(mods) == 1
+    assert mods[0].id == "valid_mod"
+    assert mods[0].version == "1.0.0"
+
+    # Dependency with empty modId
+    deps = []
+    ManifestParser._parse_forge_dep(deps, {"modId": ""})
+    assert len(deps) == 0
+
+
 def test_neoforge_missing_mods():
     with pytest.raises(ValueError, match="No \\[\\[mods\\]\\] section found"):
         ManifestParser.parse_neoforge_toml('modLoader="javafml"')
+
+
+def test_fabric_null_fields():
+    content = """{
+        "id": "null_fields_mod",
+        "provides": null,
+        "mixins": null,
+        "entrypoints": null,
+        "jars": null,
+        "authors": null
+    }"""
+    mod = ManifestParser.parse_fabric(content)
+    assert mod.id == "null_fields_mod"
+    assert mod.provides == []
+    assert mod.mixin_configs == []
+    assert mod.entrypoints == {}
+    assert mod.nested_jars == []
+    assert mod.authors == []
+
+
+def test_quilt_null_fields():
+    content = """{
+        "quilt_loader": {
+            "id": "quilt_null",
+            "depends": null,
+            "breaks": null,
+            "mixin": null
+        }
+    }"""
+    mod = ManifestParser.parse_quilt(content)
+    assert mod.id == "quilt_null"
+    assert mod.dependencies == []
+    assert mod.mixin_configs == []
+
+
+def test_forge_non_dict_dep_entry():
+    toml_str = """
+modLoader="javafml"
+[[mods]]
+modId="forge_test"
+
+[dependencies]
+forge_test = ["not_a_dict"]
+"""
+    mods = ManifestParser.parse_forge_toml(toml_str)
+    assert len(mods) == 1
+    assert len(mods[0].dependencies) == 0
+
+
+def test_neoforge_non_dict_dep_entry():
+    toml_str = """
+modLoader="javafml"
+[[mods]]
+# Skipped because no modId
+displayName="No ModId"
+
+[[mods]]
+modId="no_version_mod"
+
+[[mods]]
+modId="neoforge_test"
+version="1.0.0"
+
+[dependencies]
+# String not list to test 412->417
+no_version_mod = "not_a_list"
+# List with both non-dict and valid dict to cover 414->413
+neoforge_test = ["not_a_dict", { modId = "neo_dep" }]
+"""
+    mods = ManifestParser.parse_neoforge_toml(toml_str)
+    assert len(mods) == 2
+    assert mods[0].id == "no_version_mod"
+    assert mods[0].version == "1.0.0"
+    assert len(mods[0].dependencies) == 0
+    assert mods[1].id == "neoforge_test"
+    assert len(mods[1].dependencies) == 1
+    assert mods[1].dependencies[0].mod_id == "neo_dep"
+
+    # Test _parse_neoforge_dep with no modId to hit line 447
+    deps = []
+    ManifestParser._parse_neoforge_dep(deps, {"type": "required"})
+    assert len(deps) == 0
+
+
+def test_resolve_version_manifest_lines():
+    # Lines without colon and irrelevant keys
+    mf = "Manifest-Version: 1.0\nCreated-By: Gradle\nSomeLineWithoutColon\n"
+    ver = ManifestParser._resolve_version("", "mod.jar", mf)
+    assert ver == "1.0.0"
+

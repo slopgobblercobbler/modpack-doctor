@@ -69,7 +69,7 @@ class ModDependencyGraph:
                     continue
 
                 target_id = self.resolve_mod_id(dep.mod_id)
-                if not target_id or target_id not in self.nodes:
+                if not target_id:
                     continue
 
                 if target_id not in visited:

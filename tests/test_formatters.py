@@ -138,6 +138,11 @@ def test_markdown_formatter():
     out_ok = fmt.format_report(sample_report(healthy=True))
     assert "All checks passed!" in out_ok
 
+    # Empty mods report
+    empty_rep = DiagnosisReport(scanned_path="/empty")
+    out_empty = fmt.format_report(empty_rep)
+    assert "<details>" not in out_empty
+
     diff_out = fmt.format_diff(sample_diffs())
     assert "# 🔄 Modpack Diff Comparison" in diff_out
     assert "mod_a" in diff_out

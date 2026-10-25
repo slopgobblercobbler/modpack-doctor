@@ -148,7 +148,6 @@ class DiagnosticEngine:
                 if dep.dep_type in (DepType.CONFLICT, DepType.BREAKS):
                     target_mod = graph.get_mod(dep.mod_id)
                     if target_mod:
-                        # If version constraint matches or is wildcard
                         if not dep.version_range or dep.version_range == "*" or VersionMatcher.matches(target_mod.version, dep.version_range):
                             issues.append(
                                 DiagnosticIssue(
@@ -161,10 +160,9 @@ class DiagnosticEngine:
                                     recommendation=f"Remove either '{mod.id}' or '{target_mod.id}' to prevent crash.",
                                 )
                             )
-                    continue
 
                 # Check required dependencies
-                if dep.dep_type == DepType.REQUIRED:
+                elif dep.dep_type == DepType.REQUIRED:
                     target_mod = graph.get_mod(dep.mod_id)
 
                     # Missing dependency
@@ -390,7 +388,7 @@ def diff_modpacks(mods_a: List[ModInfo], mods_b: List[ModInfo]) -> List[Dict[str
                 "old_file": None,
                 "new_file": in_b.file_name,
             })
-        elif in_a and in_b:
+        else:
             if in_a.version != in_b.version:
                 diffs.append({
                     "mod_id": mod_id,
